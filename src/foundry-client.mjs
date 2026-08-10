@@ -7,9 +7,31 @@ export class FoundryClient {
     this.page = page;
   }
 
-  async connect(path = "/") {
-    await this.page.goto(path);
-    await this.waitUntilReady();
+  /**
+   * Open Foundry and enter the already-running world.
+   *
+   * A Playwright Chromium session is independent from the Foundry Electron
+   * client, so an unauthenticated browser can be redirected to /join.
+   *
+   * Authentication is configured through:
+   *   FOUNDRY_USER
+   *   FOUNDRY_PASSWORD
+   *
+   * FOUNDRY_USER may be either the displayed user name or the option value.
+   */
+  async connect(path = "/", { canvas = true, timeout = 60_000 } = {}) {
+    await this.page.goto(path, { waitUntil: "domcontentloaded" });
+
+    if (await this.#isGameReady()) {
+      await this.waitUntilReady({ canvas, timeout });
+      return;
+    }
+
+    if (this.#isJoinPage()) {
+      await this.#joinWorld({ timeout });
+    }
+
+    await this.waitUntilReady({ canvas, timeout });
   }
 
   async waitUntilReady({ canvas = true, timeout = 30_000 } = {}) {
@@ -165,5 +187,148 @@ export class FoundryClient {
 
   async evaluate(fn, arg) {
     return this.page.evaluate(fn, arg);
+  }
+
+  async #isGameReady() {
+    return this.page
+      .evaluate(() => globalThis.game?.ready === true)
+      .catch(() => false);
+  }
+
+  #isJoinPage() {
+    try {
+      const pathname = new URL(this.page.url()).pathname;
+      return pathname === "/join" || pathname.endsWith("/join");
+    } catch {
+      return false;
+    }
+  }
+
+  async #joinWorld({ timeout }) {
+    /*
+     * Foundry can visually style/replace its native user selector.
+     * We intentionally test for existence, not Playwright visibility.
+     */
+    const userSelect = this.page.locator(
+      'select[name="userid"], select#join-user, select[name="user"]'
+    ).first();
+
+    if (!(await userSelect.count())) {
+      throw new Error(await this.#joinPageError(
+        "Foundry /join was reached, but no user selector was found."
+      ));
+    }
+
+    const users = await userSelect.locator("option").evaluateAll((options) =>
+      options
+        .map((option) => ({
+          value: option.value,
+          label: option.textContent?.trim() ?? ""
+        }))
+        .filter((option) => option.value)
+    );
+
+    if (!users.length) {
+      throw new Error(await this.#joinPageError(
+        "The Foundry user selector exists but has no selectable users."
+      ));
+    }
+
+    const requestedUser = process.env.FOUNDRY_USER?.trim() ?? "";
+    let selected = null;
+
+    if (requestedUser) {
+      selected = users.find(
+        (user) => user.value === requestedUser || user.label === requestedUser
+      );
+
+      if (!selected) {
+        throw new Error(await this.#joinPageError(
+          `FOUNDRY_USER="${requestedUser}" was not found. Available users: ${this.#formatUsers(users)}`
+        ));
+      }
+    } else if (users.length === 1) {
+      selected = users[0];
+    } else {
+      selected = users.find((user) =>
+        /^(gamemaster|game master|gm)$/i.test(user.label)
+      );
+    }
+
+    if (!selected) {
+      throw new Error(await this.#joinPageError(
+        `Foundry has multiple users. Set FOUNDRY_USER. Available users: ${this.#formatUsers(users)}`
+      ));
+    }
+
+    await userSelect.selectOption(selected.value, { force: true });
+
+    const passwordInput = this.page.locator(
+      'input[name="password"], input#join-password, input[type="password"]'
+    ).first();
+
+    if (await passwordInput.count()) {
+      await passwordInput.fill(process.env.FOUNDRY_PASSWORD ?? "", { force: true });
+    }
+
+    const submit = this.page.locator(
+      'button[name="join"], button[data-action="join"], button[type="submit"], input[type="submit"]'
+    ).first();
+
+    if (!(await submit.count())) {
+      throw new Error(await this.#joinPageError(
+        "Foundry /join was reached, but no Join Game submit control was found."
+      ));
+    }
+
+    await submit.click({ force: true });
+
+    try {
+      await this.page.waitForFunction(
+        () => globalThis.game?.ready === true,
+        null,
+        { timeout }
+      );
+    } catch {
+      throw new Error(await this.#joinPageError(
+        `Foundry did not become ready within ${timeout} ms after submitting the Join Game form.`
+      ));
+    }
+  }
+
+  #formatUsers(users) {
+    return users.map((user) => `${user.label} [${user.value}]`).join(", ");
+  }
+
+  async #joinPageError(reason) {
+    const details = await this.page.evaluate(() => {
+      const controls = [...document.querySelectorAll("select, input, button")]
+        .map((element) => ({
+          tag: element.tagName.toLowerCase(),
+          id: element.id || "",
+          name: element.getAttribute("name") || "",
+          type: element.getAttribute("type") || "",
+          action: element.getAttribute("data-action") || "",
+          text: (element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 100)
+        }));
+
+      return {
+        title: document.title,
+        bodyClasses: document.body?.className ?? "",
+        controls
+      };
+    }).catch(() => ({
+      title: "<unavailable>",
+      bodyClasses: "<unavailable>",
+      controls: []
+    }));
+
+    return [
+      reason,
+      `Current URL: ${this.page.url()}`,
+      `Document title: ${details.title}`,
+      `Body classes: ${details.bodyClasses}`,
+      `Detected controls: ${JSON.stringify(details.controls, null, 2)}`
+    ].join("\n");
   }
 }

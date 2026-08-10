@@ -26,7 +26,7 @@ Current Playwright version: **1.62.0**.
 
 The `foundry` fixture exposes:
 
-- `connect(path = "/")`
+- `connect(path = "/", { canvas, timeout })` — opens Foundry and handles `/join` when authentication is required
 - `waitUntilReady({ canvas, timeout })`
 - `info()`
 - `assertEnvironment({ generations, systemId, moduleId })`
@@ -103,9 +103,29 @@ The image creates only the package symlinks required by the test runner under th
 
 ## Authentication
 
-`connect()` assumes the Playwright browser can reach a page that becomes a ready Foundry client. Being inside the world in your desktop Electron window does **not** authenticate the independent Playwright Chromium session.
+A Playwright Chromium browser has its own session. Being inside the world in the desktop Electron client does **not** authenticate Playwright.
 
-For a password-protected world/user, keep authentication explicit in the consuming test repository (for example a setup test plus Playwright `storageState`) rather than embedding credentials or world-specific selectors in this generic image.
+`foundry.connect()` now handles the normal Foundry `/join` flow automatically. Configure the login through environment variables:
+
+- `FOUNDRY_USER`: displayed Foundry user name or its select value.
+- `FOUNDRY_PASSWORD`: optional password for that user.
+
+If the world exposes only one selectable user, `FOUNDRY_USER` may be omitted. If multiple users exist, the helper also recognizes a user named `Gamemaster`, `Game Master`, or `GM`; otherwise set `FOUNDRY_USER` explicitly.
+
+Example:
+
+```powershell
+docker run --rm `
+  -e FOUNDRY_URL=http://host.docker.internal:30000 `
+  -e FOUNDRY_USER=Gamemaster `
+  -e FOUNDRY_PASSWORD="" `
+  -v "${PWD}:/work" `
+  ghcr.io/YOUR-OWNER/foundry-playwright:latest
+```
+
+Credentials are supplied at runtime and are not stored in the image or module repository.
+
+If Foundry changes the `/join` markup, connection errors include the URL, page title, body classes, and detected form controls to make the compatibility adjustment explicit.
 
 ## Canvas/token coordinates
 
