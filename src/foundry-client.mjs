@@ -20,7 +20,8 @@ export class FoundryClient {
    * FOUNDRY_USER may be either the displayed user name or the option value.
    */
   async connect(path = "/", { canvas = true, timeout = 60_000 } = {}) {
-    await this.page.goto(path, { waitUntil: "domcontentloaded" });
+    const targetUrl = this.#resolveUrl(path);
+    await this.page.goto(targetUrl, { waitUntil: "domcontentloaded" });
 
     if (await this.#isGameReady()) {
       await this.waitUntilReady({ canvas, timeout });
@@ -189,6 +190,15 @@ export class FoundryClient {
     return this.page.evaluate(fn, arg);
   }
 
+  #resolveUrl(path) {
+    if (/^https?:\/\//i.test(path)) return path;
+
+    const baseUrl = process.env.FOUNDRY_URL ?? "http://host.docker.internal:30000";
+    const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+
+    return new URL(path, normalizedBase).href;
+  }
+
   async #isGameReady() {
     return this.page
       .evaluate(() => globalThis.game?.ready === true)
@@ -205,10 +215,6 @@ export class FoundryClient {
   }
 
   async #joinWorld({ timeout }) {
-    /*
-     * Foundry can visually style/replace its native user selector.
-     * We intentionally test for existence, not Playwright visibility.
-     */
     const userSelect = this.page.locator(
       'select[name="userid"], select#join-user, select[name="user"]'
     ).first();
