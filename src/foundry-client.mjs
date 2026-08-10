@@ -215,6 +215,8 @@ export class FoundryClient {
   }
 
   async #joinWorld({ timeout }) {
+    await this.#waitForJoinUi({ timeout: Math.min(timeout, 15_000) });
+
     const userSelect = this.page.locator(
       'select[name="userid"], select#join-user, select[name="user"]'
     ).first();
@@ -302,6 +304,33 @@ export class FoundryClient {
     }
   }
 
+  async #waitForJoinUi({ timeout }) {
+    try {
+      await this.page.waitForFunction(
+        () => {
+          if (globalThis.game?.ready === true) return true;
+
+          return Boolean(document.querySelector(
+            [
+              'select[name="userid"]',
+              'select#join-user',
+              'select[name="user"]',
+              'input[name="password"]',
+              'input#join-password',
+              'button[name="join"]',
+              'button[data-action="join"]',
+              'button[type="submit"]'
+            ].join(",")
+          ));
+        },
+        null,
+        { timeout }
+      );
+    } catch {
+      // #joinWorld will produce the detailed diagnostic below.
+    }
+  }
+
   #formatUsers(users) {
     return users.map((user) => `${user.label} [${user.value}]`).join(", ");
   }
@@ -321,12 +350,16 @@ export class FoundryClient {
       return {
         title: document.title,
         bodyClasses: document.body?.className ?? "",
-        controls
+        controls,
+        bodyHtml: (document.body?.innerHTML ?? "")
+          .replace(/\\s+/g, " ")
+          .slice(0, 4000)
       };
     }).catch(() => ({
       title: "<unavailable>",
       bodyClasses: "<unavailable>",
-      controls: []
+      controls: [],
+      bodyHtml: "<unavailable>"
     }));
 
     return [
@@ -334,7 +367,8 @@ export class FoundryClient {
       `Current URL: ${this.page.url()}`,
       `Document title: ${details.title}`,
       `Body classes: ${details.bodyClasses}`,
-      `Detected controls: ${JSON.stringify(details.controls, null, 2)}`
+      `Detected controls: ${JSON.stringify(details.controls, null, 2)}`,
+      `Body HTML excerpt: ${details.bodyHtml}`
     ].join("\n");
   }
 }
