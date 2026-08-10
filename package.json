@@ -1,0 +1,21 @@
+{
+  "name": "@foundry-test/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Unofficial Playwright helpers for testing Foundry VTT modules against a running world.",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./config": "./src/config.mjs"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "syntax": "node --check src/index.mjs && node --check src/foundry-client.mjs && node --check src/config.mjs"
+  },
+  "dependencies": {
+    "@playwright/test": "1.62.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

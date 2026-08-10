@@ -1,0 +1,10 @@
+services:
+  playwright:
+    image: registry.example.com/foundry-playwright:0.1.0
+    working_dir: /work
+    volumes:
+      - ./:/work
+    environment:
+      FOUNDRY_URL: http://host.docker.internal:30000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
